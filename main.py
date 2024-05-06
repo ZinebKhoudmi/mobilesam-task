@@ -4,6 +4,10 @@ import numpy as np
 import torch
 from mobile_sam import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 from PIL import Image
+from fastapi import FastAPI, UploadFile
+from io import BytesIO
+from fastapi.responses import Response
+from fastapi.exceptions import HTTPException
 
 from tools import box_prompt, format_results, point_prompt, fast_process
 
@@ -54,15 +58,28 @@ def segment_everything(
     return fig
 
 
+app = FastAPI()
 
-if __name__ == "__main__":
-    input_path = "resources/dog.jpg"
-    output_path = "generated/output.png"
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    image = Image.open(input_path).convert("RGB")
+@app.post("/segment-image/")
+async def uploadfile(file: UploadFile):
+    # check the content type (MIME type)
+    content_type = file.content_type
+    if content_type not in ["image/jpeg", "image/png", "image/gif"]:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    
+    # Read the contents of the uploaded file
+    file_contents = await file.read()
+    # Convert the file contents to a PIL Image object
+    image = Image.open(BytesIO(file_contents))
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
     fig = segment_everything(
         image=image
     )
-    fig.save(output_path)
+    with BytesIO() as buf:
+        if fig.mode == 'RGBA':
+            fig = fig.convert('RGB')
+        fig.save(buf, format='PNG')
+        img_bytes = buf.getvalue()
+    return Response(img_bytes, media_type="image/png")
